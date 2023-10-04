@@ -1,0 +1,515 @@
+---
+title: "EDA_New"
+author: "Chris Mathews"
+date: "2023-07-28"
+output: html_document
+---
+
+# Prep Work
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Necessary libraries for data manipulation
+suppressPackageStartupMessages(library(tidyverse))
+
+library(tidymodels)
+
+library(skimr)
+library(cluster)    # clustering algorithms
+library(factoextra) # clustering algorithms & visualization
+
+```
+
+# 1. Load the Data
+
+```{r}
+raw_data <- read_csv("zomato.csv")
+```
+
+```{r}
+df <- raw_data
+```
+
+```{r}
+df <- df %>%
+  distinct(address, name, .keep_all = TRUE) 
+```
+
+```{r}
+
+drop_list <- c('url', 'address', 'phone', 'reviews_list', 'menu_item', 'name', 'location')
+
+df <- df %>%
+  select(-one_of(drop_list))
+```
+
+```{r}
+# Replace 'NEW' and '-' with NA in 'rate'
+df <- df %>%
+  mutate(rate = ifelse(rate %in% c("NEW", "-"), NA, as.numeric(gsub("/5$", "", rate))))
+
+```
+
+```{r}
+# Drop rows with missing values in 'rate' column
+df <- df %>%
+  drop_na(rate)
+```
+
+```{r}
+# Rename the 'approx_cost(for two people)' column to 'approx_cost_for_two_people'
+df <- df %>%
+  rename(approx_cost_for_two_people = `approx_cost(for two people)`)
+df <- df %>%
+  rename(listed_in_city = `listed_in(city)`)
+df <- df %>%
+  rename(listed_in_type = `listed_in(type)`)
+
+
+```
+
+
+```{r}
+# Drop rows with missing values in 'rest_type', 'approx_cost_for_two_people', and 'cuisines' columns
+df <- df %>%
+  drop_na(rest_type, approx_cost_for_two_people, cuisines)
+```
+
+```{r}
+# Create the 'num_of_cuisines' feature
+df <- df %>%
+  mutate(num_of_cuisines = sapply(strsplit(cuisines, ','), length))
+
+# Create the 'num_of_dish_liked' feature
+df <- df %>%
+  mutate(num_of_dish_liked = sapply(strsplit(dish_liked, ','), length))
+
+# Create the 'num_of_dish_liked' feature
+df <- df %>%
+  mutate(num_of_rest_type = sapply(strsplit(rest_type, ','), length))
+
+
+# Drop the 'dish_liked' and 'cuisines' columns
+df <- df %>%
+  select(-cuisines, -dish_liked, -rest_type)
+```
+
+```{r}
+# Function to remove outliers from a numerical column in a dataframe
+remove_outlier <- function(data, col_name) {
+  col_values <- data[[col_name]]
+  col_mean <- mean(col_values, na.rm = TRUE)
+  col_sd <- sd(col_values, na.rm = TRUE)
+  outlier_threshold <- col_mean + 3 * col_sd  # Adjust the multiplier (3) based on your criteria
+
+  data <- data %>%
+    filter(.data[[col_name]] <= outlier_threshold)
+
+  return(data)
+}
+```
+
+```{r}
+# Call the function to remove outliers for 'votes' column
+df <- remove_outlier(df, 'votes')
+
+# Call the function to remove outliers for 'approx_cost_for_two_people' column
+df <- remove_outlier(df, 'approx_cost_for_two_people')
+```
+
+```{r}
+# Convert 'book_table' column to numeric
+#df$book_table <- ifelse(df$book_table == "Yes", 1, 0)
+
+# Convert 'order_online' column to numeric
+#df$online_order <- ifelse(df$online_order == "Yes", 1, 0)
+
+df$book_table <- as.factor(df$book_table)
+df$online_order <- as.factor(df$online_order)
+
+# Convert 'location' to factor
+df$listed_in_city <- as.factor(df$listed_in_city)
+
+# Convert 'rest_type' to factor
+df$listed_in_type <- as.factor(df$listed_in_type)
+```
+
+# ```{r}
+# # Assuming 'df' is your dataframe with the 'location' and 'rest_type' columns
+# 
+# # Get unique values of 'location' and 'rest_type'
+# unique_locations <- unique(df$location)
+# unique_rest_types <- unique(df$rest_type)
+# 
+# # Create a mapping dataframe with integer-value pairs for 'location'
+# location_mapping <- tibble(
+#   location_integer = seq_along(unique_locations),
+#   location = unique_locations
+# )
+# 
+# # Create a mapping dataframe with integer-value pairs for 'rest_type'
+# rest_type_mapping <- tibble(
+#   rest_type_integer = seq_along(unique_rest_types),
+#   rest_type = unique_rest_types
+# )
+# ```
+
+
+# ```{r}
+# # Select only numeric columns from 'df' and store them in 'num_df'
+# num_df <- df %>%
+#   select_if(is.numeric)
+# ```
+
+```{r}
+str(df)
+summary(df)
+```
+
+# End The Prep Work
+
+
+
+# K-Means Setup
+
+
+```{r}
+#kmeans_recipe = recipe(~ online_order + book_table + rate + votes + approx_cost_for_two_people + listed_in_type + listed_in_city + num_of_cuisines + num_of_dish_liked + num_of_rest_type, df) 
+
+```
+
+```{r}
+#kmeans_recipe = recipe(~ online_order + book_table + rate + votes + approx_cost_for_two_people  + num_of_cuisines + num_of_dish_liked + listed_in_type, df) 
+
+```
+
+```{r}
+kmeans_recipe = recipe(~ rate + votes + approx_cost_for_two_people + listed_in_type + listed_in_city + num_of_cuisines + num_of_dish_liked, df) 
+
+```
+
+
+```{r}
+
+rest_dummy = kmeans_recipe %>% 
+  step_dummy(all_nominal(), one_hot = TRUE) %>%
+  step_scale(all_numeric()) %>%
+  step_center(all_numeric()) 
+
+rest_dummy = prep(rest_dummy, df) #prepares the recipe
+
+rest_cleaned = bake(rest_dummy, df) #applies the recipe and yields a data frame
+```
+
+```{r}
+#we have two data frames now, one scaled and dummied and one with just row-wise deletion of missingness
+summary(rest_cleaned)
+summary(df)
+```
+ #End The K-Means Setup
+ 
+ #Evaluate the Clusters 1-20 Elbow Method
+
+# ```{r}
+# set.seed(1234)
+# clusts = 
+#   tibble(k = 1:20) %>%
+#   mutate(
+#     kclust = map(k, ~kmeans(rest_cleaned, .x)),
+#     tidied = map(kclust, tidy),
+#     glanced = map(kclust, glance),
+#     augmented = map(kclust, augment, rest_cleaned)
+#   )
+# 
+# clusts
+# ```
+
+# ```{r}
+# clusters = 
+#   clusts %>%
+#   unnest(cols = c(tidied))
+# 
+# assignments = 
+#   clusts %>% 
+#   unnest(cols = c(augmented))
+# 
+# clusterings = 
+#   clusts %>%
+#   unnest(cols = c(glanced))
+# ```
+
+K-Means Cluster optimization Elbow Method
+
+# ```{r}
+# p1 = 
+#   ggplot(assignments, aes(x = rate, y = votes)) +
+#   geom_point(aes(color = .cluster), alpha = 0.8) + 
+#   facet_wrap(~ k)
+# p1
+# ```
+# 
+# ```{r}
+# ggplot(clusterings, aes(k, tot.withinss)) +
+#   geom_line() +
+#   geom_point() +
+#   labs(title = "Cluster Optimization Results using Elbow Method")
+# ```
+
+# End the Finding the best Cluster - Elbow Method
+
+# Do the Actual Cluster Analysis
+
+```{r}
+set.seed(1234)
+clusters = kmeans(rest_cleaned, centers = 7, nstart = 25)
+```
+
+```{r}
+print(clusters)
+```
+
+```{r}
+library(cluster)    # clustering algorithms
+library(factoextra) # clustering algorithms & visualization
+```
+
+```{r}
+fviz_cluster(clusters, data = df)
+```
+
+
+Attach cluster to dataset
+```{r}
+df = augment(clusters, df)
+str(df)
+```
+
+# Plots
+```{r fig.height=10, fig.width=12}
+ggplot(df, aes(x=rate,y=approx_cost_for_two_people,color=factor(.cluster))) + 
+  geom_point() + 
+  facet_wrap(~factor(listed_in_type)) +
+  labs(title = "Scatter Plot of Rating vs. Approx Cost for Two People by Restaurant Type",
+    x = "Votes", y = "Approx Cost for Two People", color = "Cluster") +
+  theme_light()
+```
+
+```{r fig.height=10, fig.width=12}
+ggplot(df, aes(x=votes,y=approx_cost_for_two_people,color=factor(.cluster))) + 
+  geom_point() + 
+  facet_wrap(~factor(listed_in_city)) +
+  labs(title = "Scatter Plot of Rating vs. Approx Cost for Two People by City",
+    x = "Votes", y = "Approx Cost for Two People", color = "Cluster") +
+  theme_light()
+```
+
+```{r fig.height=16, fig.width=18}
+library(ggthemes)
+# Create the scatter plot
+plot <- ggplot(df, aes(x = approx_cost_for_two_people, y = votes, shape = factor(.cluster), color = listed_in_type)) +
+  geom_point(size = 2) +
+  facet_wrap(~factor(listed_in_city)) +
+  labs(title = "Scatter Plot of Votes vs. Approx Cost for Two People by Cluster",
+       x = "Votes", y = "Approx Cost for Two People", color = "Cluster") +
+  #scale_color_manual(values = c("#E41A1C", "#377EB8")) +  # Customize color palette
+  scale_shape_manual(values = c(19, 1, 3, 2, 5, 6, 7)) +  # Customize point markers
+  theme_economist() + scale_fill_economist() + scale_color_economist()
+
+# Display the plot
+print(plot)
+```
+
+```{r fig.height=10, fig.width=12}
+mean_rating <- mean(df$rate)
+
+# Define the colors for each cluster
+cluster_colors <- c("red", "orange", "red", "lightgreen", "orange", "yellow", "darkgreen")
+
+
+# Create the box plot with the colored boxes and labeled horizontal line
+plot <- ggplot(df, aes(x = factor(.cluster), y = rate, fill = factor(.cluster))) +
+  geom_boxplot(show.legend = FALSE) +
+  geom_hline(yintercept = mean_rating, linetype = "dashed", color = "red") +  # Add the dotted line
+  geom_text(aes(x = 6.5, y = mean_rating - 0.05, label = sprintf("Mean: %.2f", mean_rating)),
+            color = "black", size = 4, hjust = 0) +  # Add the label with black color
+  labs(title = "Average Ratings by Cluster",
+       x = "Cluster", y = "Rating") +
+  scale_fill_manual(values = cluster_colors) +  # Set the colors based on cluster number
+  theme(axis.text = element_text(size = 20))
+
+# Display the plot
+print(plot)
+
+```
+
+
+```{r}
+# Assuming 'df' is your dataframe with the 'CLUSTER_NO' column
+df$.cluster <- as.integer(df$.cluster)
+```
+
+```{r}
+fin_df <- df %>%
+  group_by(listed_in_type, listed_in_city, online_order, book_table, .cluster) %>%
+  summarise(
+    count_ofrestaurants = n(),
+    rate = mean(rate),
+    votes = mean(votes),
+    approx_cost_for_two_people = mean(approx_cost_for_two_people),
+    num_of_dish_liked = mean(num_of_dish_liked),
+    num_of_cuisines = mean(num_of_cuisines))
+```
+
+```{r}
+fin_df <- fin_df %>%
+  arrange(desc(rate))
+fin_df
+```
+
+```{r}
+fin_2_df <- df %>%
+  group_by(.cluster) %>%
+  summarise(
+    rate = mean(rate),
+    votes = mean(votes),
+    approx_cost_for_two_people = mean(approx_cost_for_two_people),
+    num_of_dish_liked = mean(num_of_dish_liked),
+    num_of_cuisines = mean(num_of_cuisines),
+    online_order_percentage = sum(online_order == levels(online_order)[levels(online_order) == "Yes"]) / n() * 100,
+    book_table_percentage = sum(book_table == levels(book_table)[levels(book_table) == "Yes"]) / n() * 100
+  )
+```
+
+```{r}
+fin_2_df <- fin_2_df %>%
+  arrange(desc(rate))
+fin_2_df
+```
+
+```{r}
+write.csv(fin_df, file = "final_presciptive.csv", row.names = FALSE)
+write.csv(fin_2_df, file = "final_predictive.csv", row.names = FALSE)
+```
+
+```{r}
+write.csv(df, file = "final.csv", row.names = FALSE)
+```
+
+
+# PCA Analysis
+
+```{r}
+pca_recipe = recipe(~., df) %>% #note that there is nothing to the left of the ~
+  update_role(.cluster, new_role = "id") %>% #keep this variable around, but not using in our analysis
+  step_dummy(all_nominal()) %>% #dummy the categorical variables
+  step_normalize(all_predictors()) %>% #normalize all of the predictors (all variables except Churn)
+  step_pca(all_predictors()) #do PCA
+```
+
+```{r}
+pca_model = prep(pca_recipe)
+```
+
+```{r fig.height=10, fig.width=10}
+tidied_pca = tidy(pca_model, 3)
+
+tidied_pca %>%
+  filter(component %in% paste0("PC", 1:10)) %>%
+  mutate(component = fct_inorder(component)) %>%
+  ggplot(aes(value, terms, fill = terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~component, nrow = 1) +
+  labs(title = "First 10 Primary Components", y = NULL)
+```
+```{r}
+sdev = pca_model$steps[[3]]$res$sdev
+```
+
+```{r}
+percent_variation = sdev^2 / sum(sdev^2)
+```
+
+```{r}
+var_df = data.frame(PC=paste0("PC",1:length(sdev)),
+                     var_explained=percent_variation,
+                     stringsAsFactors = FALSE)
+```
+
+```{r}
+var_df %>%
+  mutate(PC = fct_inorder(PC)) %>%
+  ggplot(aes(x=PC,y=var_explained))+geom_col() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Relative Importance of Each Principal Component")
+```
+
+# ```{r}
+# set.seed(1234)
+# 
+# pam_mdl <- data.frame(k = 2:20) %>%
+#   mutate(
+#     mdl = map(k, ~pam(df, k = .)),
+#     sil = map_dbl(mdl, ~ .$silinfo$avg.width)
+#   )
+# 
+# ```
+
+# ```{r}
+# pam_mdl %>%
+#   ggplot(aes(x = k, y = sil)) +
+#   geom_point(size = 2) +
+#   geom_line() +
+#   geom_vline(aes(xintercept = 7), linetype = 2, size = 1, color = "cyan") +
+#   scale_x_continuous(breaks = pam_mdl$k) +
+#   theme_light() +
+#   labs(title = "Silhouette plot", 
+#        subtitle = "K-Medoids within-cluster average silhouette width at candidate values of K.", 
+#        y = "")
+# ```
+
+```{r}
+centroids <- as_tibble(clusters$centers, rownames='clusters')
+centroids
+
+ggplot(df, aes(x = rate, y = votes, color = .cluster)) + geom_point() +
+  geom_point(data = centroids, aes(x = rate, y = votes, color = clusters), shape = 3, size = 10)
+             
+```
+```{r}
+# Calculate Silhouette Scores
+silhouette_scores <- silhouette(df[, -c(".cluster")], cluster_vec = df$.cluster)
+
+# Print the Silhouette Scores
+print(silhouette_scores)
+
+```
+
+```{r}
+unique_cities <- unique(df$listed_in_city)
+
+unique_cities_df <- data.frame(listed_in_city = unique_cities)
+# Replace 'unique_cities.csv' with the desired file name and path
+write_csv(unique_cities_df, "unique_cities.csv")
+```
+
+```{r}
+
+fviz_cluster(object = clusters, data = rest_cleaned,repel = FALSE,
+             geom = "point",
+             show.clust.cent = TRUE,
+             ellipse.type = "norm",
+             ggtheme = theme_minimal(),
+             main = "Factor map",
+             alpha = 0)
+```
+
+```{r}
+
+fviz_cluster(object = clusters, data = df, geom = "point",
+choose.vars = c("rate", "votes"), stand = FALSE, 
+ellipse.type = "norm") + theme_bw()
+```
+

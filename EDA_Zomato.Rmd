@@ -1,0 +1,146 @@
+---
+title: "EDA Zomato"
+author: "Chris Mathews"
+date: "2023-07-15"
+output: pdf_document
+---
+
+# 0. Setup & Libraries
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Necessary libraries for data manipulation
+suppressPackageStartupMessages(library(tidyverse))
+
+# For text processing
+suppressPackageStartupMessages(library(tidytext))
+
+# For geocoding
+suppressPackageStartupMessages(library(ggmap))
+
+# For displaying wordclouds
+suppressPackageStartupMessages(library(wordcloud))
+
+# For deep learning
+suppressPackageStartupMessages(library(keras))
+
+```
+
+# 1. Load the Data
+
+```{r}
+restaurant_data_raw <- read_csv("zomato.csv")
+```
+# 1a.  Setup sub datasets
+
+## Clean without the reviews
+```{r}
+# Create a new dataframe without 'reviews_list', 'menu_item', 'phone', and 'url' columns
+restaurant_data <- restaurant_data_raw %>%
+  select(-reviews_list, -menu_item, -phone, -url)
+```
+
+##The reviews and enough data to link back to the main one
+
+```{r}
+# Create a new dataframe with 'reviews_list', name, and 'address' columns
+reviews_restaurant_data <- restaurant_data_raw %>%
+  select(reviews_list, name, address, url)
+```
+
+
+```{r}
+cat("dataset contains", nrow(restaurant_data_raw), "rows and", ncol(restaurant_data_raw), "columns")
+
+# Check the number of missing values in each column
+missing_counts <- restaurant_data_raw %>% 
+  summarise_all(~sum(is.na(.))) %>%
+  t() %>%
+  as.data.frame()
+
+# Check the number of unique values in each column
+unique_counts <- restaurant_data_raw %>% 
+  summarise_all(~n_distinct(.)) %>%
+  t() %>%
+  as.data.frame()
+
+# Combine the missing and unique counts into a single dataframe
+column_stats <- cbind(missing_counts, unique_counts)
+
+# Set column names
+colnames(column_stats) <- c("Missing", "Unique")
+
+# Set row names as column names of original dataframe
+row.names(column_stats) <- colnames(restaurant_data_raw)
+
+# Print the resulting dataframe
+print(column_stats)
+```
+
+```{r}
+restaurant_data %>% 
+  summarise(n = n_distinct(paste(name, address)))
+```
+
+```{r}
+restaurant_data <- restaurant_data %>% 
+  mutate(restaurant_id = paste(name, address)) %>%
+  mutate(restaurant_id = tolower(restaurant_id)) %>% 
+  mutate(restaurant_id = gsub("\\s+","", restaurant_id)) %>% 
+  mutate(restaurant_id = str_replace_all(restaurant_id, "[^[:alnum:]]", ""))
+
+restaurant_data %>% 
+  summarise(n = n_distinct(paste(restaurant_id)))
+```
+
+```{r}
+# Print the first 10 rows of the dataframe
+print(head(restaurant_data, 10))
+```
+```{r}
+# Clean 'rate' column and convert to numeric
+restaurant_data <- restaurant_data %>%
+  mutate(rate = str_replace(rate, "/5", "")) %>%
+  mutate(rate = as.numeric(rate))
+
+print(head(restaurant_data, 10))
+```
+
+```{r}
+# Convert 'online_order' and 'book_table' to logical
+restaurant_data <- restaurant_data %>%
+  mutate(online_order = ifelse(online_order == "Yes", TRUE, FALSE)) %>%
+  mutate(book_table = ifelse(book_table == "Yes", TRUE, FALSE))
+
+print(head(restaurant_data, 10))
+```
+```{r}
+# Separate the rest_type column into multiple rows
+restaurant_data_long <- restaurant_data %>%
+  separate_rows(rest_type, sep = ",\\s*") %>%
+  mutate(rest_type = as.factor(rest_type))
+
+# Define a dummyVars model
+dv_model <- dummyVars(~ ., data = restaurant_data_long, fullRank = TRUE)
+
+# Apply the model to your data to get one hot encoded data frame
+restaurant_data_one_hot_temp <- data.frame(predict(dv_model, newdata = restaurant_data_long))
+
+# Add the restaurant_id column back to the one hot encoded data
+restaurant_data_one_hot_temp$restaurant_id <- restaurant_data_long$restaurant_id
+
+# Aggregate the dataframe by restaurant_id
+restaurant_data_one_hot_temp <- restaurant_data_one_hot_temp %>%
+  group_by(restaurant_id) %>%
+  summarise_all(sum)
+
+# Merge restaurant_data and restaurant_data_one_hot_temp
+restaurant_data_one_hot <- left_join(restaurant_data, restaurant_data_one_hot_temp, by = "restaurant_id")
+
+# Show the first few rows of the new dataframe
+head(restaurant_data_one_hot)
+
+```

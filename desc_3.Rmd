@@ -1,0 +1,174 @@
+---
+title: "desc_3"
+author: "Chris Mathews"
+date: "2023-07-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+suppressWarnings(if(!require("pacman")) install.packages("pacman"))
+
+pacman::p_load('tidyverse', 'tidymodels', 'skimr', 'here', 'plotly', 'factoextra', 'cluster')
+```
+
+```{r}
+restaurant_data <- read_csv("filtered_restaurant_data.csv")
+```
+```{r}
+# Dropping 'restaurant_id' columns
+restaurant_data <- restaurant_data %>% 
+  select(-c('restaurant_id', 'listed_in_type'))
+```
+
+```{r}
+summary(restaurant_data)
+```
+
+```{r}
+# List the columns of the restaurant_data dataset
+column_names <- colnames(restaurant_data)
+print(column_names)
+```
+
+```{r}
+# Convert listed_in_type and listed_in_city to factors
+restaurant_data <- restaurant_data %>%
+  mutate(
+    #listed_in_type = factor(listed_in_type),
+    listed_in_city = factor(listed_in_city)
+  )
+
+# Now the columns listed_in_type and listed_in_city are converted to factors.
+# You can check the data structure using the str() function:
+str(restaurant_data)
+```
+```{r}
+
+# Remove NA values and replace them with 0 in specific columns
+restaurant_data <- restaurant_data %>%
+  mutate(
+    num_rest_type = ifelse(is.na(num_rest_type), 0, num_rest_type),
+    num_dishes_liked = ifelse(is.na(num_dishes_liked), 0, num_dishes_liked),
+    num_cuisines = ifelse(is.na(num_cuisines), 0, num_cuisines),
+    log_cost = ifelse(is.na(log_cost), 0, log_cost)
+  )
+
+restaurant_data <- restaurant_data %>%
+  mutate(book_table = as.integer(book_table),
+          online_order = as.integer(online_order))
+
+
+```
+
+kmeans_recipe = recipe(~  online_order + book_table + rate + listed_in_type + listed_in_city + num_rest_type + num_dishes_liked + num_cuisines + log_votes + log_cost, restaurant_data) 
+
+restaurant_dummy = kmeans_recipe %>% 
+  step_dummy(all_nominal(), one_hot = TRUE) %>%
+  step_scale(all_numeric()) %>%
+  step_center(all_numeric()) 
+
+```{r}
+# Specify a recipe for pca
+pca_rec <- recipe(~ ., data = restaurant_data) %>% 
+  update_role(rate, new_role = "ID") %>% 
+  step_dummy(all_nominal(), one_hot = TRUE) %>%
+  step_scale(all_numeric()) %>%
+  step_center(all_numeric()) %>%
+  step_pca(all_predictors(), num_comp = 2, id = "pca")
+
+# Print out recipe
+pca_rec
+```
+
+```{r}
+# Estimate required statistcs 
+pca_estimates <- prep(pca_rec)
+
+# Return preprocessed data using bake
+features_2d <- pca_estimates %>% 
+  bake(new_data = NULL)
+
+# Print baked data set
+features_2d %>% 
+  slice_head(n = 5)
+```
+
+```{r}
+# Examine how much variance each PC accounts for
+pca_estimates %>% 
+  tidy(id = "pca", type = "variance") %>% 
+  filter(str_detect(terms, "percent"))
+```
+
+```{r}
+theme_set(theme_light())
+# Plot how much variance each PC accounts for
+pca_estimates %>% 
+  tidy(id = "pca", type = "variance") %>% 
+  filter(terms == "percent variance") %>% 
+  ggplot(mapping = aes(x = component, y = value)) +
+  geom_col(fill = "midnightblue", alpha = 0.7) +
+  ylab("% of total variance")
+```
+
+```{r}
+# Visualize PC scores
+features_2d %>% 
+  ggplot(mapping = aes(x = PC1, y = PC2)) +
+  geom_point(size = 2, color = "dodgerblue3")
+```
+
+```{r}
+# Drop target column and normalize data
+rest_features<- recipe(~ ., data = restaurant_data) %>% 
+  update_role(rate, new_role = "ID") %>% 
+  step_dummy(all_nominal(), one_hot = TRUE) %>%
+  step_scale(all_numeric()) %>%
+  step_center(all_numeric()) %>%
+  prep() %>% 
+  bake(new_data = NULL)
+
+# Print out data
+rest_features %>% 
+  slice_head(n = 5)
+```
+
+```{r}
+set.seed(2056)
+# Create 10 models with 1 to 10 clusters
+kclusts <- tibble(k = 1:20) %>% 
+  mutate(
+    model = map(k, ~ kmeans(x = rest_features, centers = .x, nstart = 20)),
+    glanced = map(model, glance)) %>% 
+  unnest(cols = c(glanced))
+
+# View results
+kclusts
+```
+
+```{r}
+# Plot Total within-cluster sum of squares (tot.withinss)
+kclusts %>% 
+  ggplot(mapping = aes(x = k, y = tot.withinss)) +
+  geom_line(size = 1.2, alpha = 0.5, color = "dodgerblue3") +
+  geom_point(size = 2, color = "dodgerblue3")
+
+```
+
+```{r}
+kclusts %>%
+  ggplot(aes(x = k, y = sil)) +
+  geom_point(size = 2) +
+  geom_line() +
+  geom_vline(aes(xintercept = 6), linetype = 2, size = 1, color = "goldenrod") +
+  scale_x_continuous(breaks = kclusts$k) +
+  theme_light() +
+  labs(title = "Silhouette plot max occurs at K = 6 clusters.", 
+       subtitle = "K-Medoids within-cluster average silhouette width at candidate values of K.", 
+       y = "")
+```
+

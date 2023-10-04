@@ -1,0 +1,152 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+```
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+```
+
+```{r}
+restaurant_data <- read_csv("filtered_restaurant_data.csv")
+```
+
+```{r}
+# List the columns of the restaurant_data dataset
+column_names <- colnames(restaurant_data)
+print(column_names)
+```
+
+```{r}
+# Convert listed_in_type and listed_in_city to factors
+restaurant_data <- restaurant_data %>%
+  mutate(
+    listed_in_type = factor(listed_in_type),
+    listed_in_city = factor(listed_in_city)
+  )
+
+# Now the columns listed_in_type and listed_in_city are converted to factors.
+# You can check the data structure using the str() function:
+str(restaurant_data)
+```
+
+```{r}
+# Remove NA values and replace them with 0 in specific columns
+restaurant_data <- restaurant_data %>%
+  mutate(
+    num_rest_type = ifelse(is.na(num_rest_type), 0, num_rest_type),
+    num_dishes_liked = ifelse(is.na(num_dishes_liked), 0, num_dishes_liked),
+    num_cuisines = ifelse(is.na(num_cuisines), 0, num_cuisines),
+    log_cost = ifelse(is.na(log_cost), 0, log_cost)
+  )
+```
+
+```{r}
+summary(restaurant_data)
+```
+
+```{r}
+kmeans_recipe = recipe(~  online_order + book_table + rate + listed_in_type + listed_in_city + num_rest_type + num_dishes_liked + num_cuisines + log_votes + log_cost, restaurant_data) 
+
+restaurant_dummy = kmeans_recipe %>% 
+  step_dummy(all_nominal(), one_hot = TRUE) %>%
+  step_scale(all_numeric()) %>%
+  step_center(all_numeric()) 
+
+restaurant_dummy = prep(restaurant_dummy, restaurant_data) #prepares the recipe
+
+restaurant_cleaned = bake(restaurant_dummy, restaurant_data) #applies the recipe and yields a data frame
+```
+
+```{r}
+set.seed(1234)
+clusts = 
+  tibble(k = 1:15) %>%
+  mutate(
+    kclust = map(k, ~kmeans(restaurant_cleaned, .x)),
+    tidied = map(kclust, tidy),
+    glanced = map(kclust, glance),
+    augmented = map(kclust, augment, restaurant_cleaned)
+  )
+
+clusts
+```
+
+```{r}
+clusters = 
+  clusts %>%
+  unnest(cols = c(tidied))
+
+assignments = 
+  clusts %>% 
+  unnest(cols = c(augmented))
+
+clusterings = 
+  clusts %>%
+  unnest(cols = c(glanced))
+```
+
+```{r}
+p1 = 
+  ggplot(assignments, aes(x = rate, y = num_cuisines)) +
+  geom_point(aes(color = .cluster), alpha = 0.8) + 
+  facet_wrap(~ k)
+p1
+```
+
+```{r}
+ggplot(clusterings, aes(k, tot.withinss)) +
+  geom_line() +
+  geom_point()
+```
+
+```{r}
+set.seed(1234)
+clusters = kmeans(restaurant_cleaned, 9)
+```
+
+```{r}
+restaurant_data = augment(clusters, restaurant_data)
+str(restaurant_data)
+```
+
+Plots
+
+```{r}
+ggplot(restaurant_data, aes(x = rate, y = num_cuisines,color=factor(.cluster))) + geom_point() + facet_wrap(restaurant_data$num_dishes_liked)
+```
+
+```{r}
+cluster_func <- function(df, n_clusters) {
+  km <- kmeans(df, centers = n_clusters)
+  return(km$cluster)
+}
+
+```
+
+```{r}
+restaurant_data[is.na(restaurant_data)] <- 0    # replace NA with 0
+restaurant_data[is.nan(restaurant_data)] <- 0   # replace NaN with 0
+restaurant_data[is.infinite(restaurant_data)] <- 0   # replace Inf with 0
+```
+
+```{r}
+set.seed(123)  # for reproducibility
+
+bootstrap_samples <- lapply(1:100, function(x) {
+  # Sample with replacement from the row indices
+  boot_rows <- sample(nrow(restaurant_data), replace = TRUE)
+  
+  # Subset the data
+  boot_data <- restaurant_data[boot_rows, ]
+  
+  # Perform clustering
+  cluster_assignments <- cluster_func(boot_data, n_clusters = 6)
+  
+  return(data.frame(row = boot_rows, cluster = cluster_assignments))
+})
+```

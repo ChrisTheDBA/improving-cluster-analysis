@@ -1,0 +1,97 @@
+---
+title: "Desc_2"
+author: "Chris Mathews"
+date: "2023-07-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(skimr)
+library(themis) # for step_other and step_dummy
+library(plotly)            # interactive graphing
+library(cluster)           # daisy and pam
+library(Rtsne)             # dimensionality reduction and visualization
+library(dendextend)        # color_branches
+```
+
+```{r}
+pkgs <- sort(c('tidyverse', 'factoextra', 'dbscan', 'cluster', 'mclust', 
+  'kernlab', 'e1071', 'scatterpie', 'fpc', 'seriation', 'mlbench', 'GGally'
+))
+  
+pkgs_install <- pkgs[!(pkgs %in% installed.packages()[,"Package"])]
+if(length(pkgs_install)) install.packages(pkgs_install)
+```
+
+
+```{r}
+restaurant_data <- read_csv("filtered_restaurant_data.csv")
+```
+
+```{r}
+# Dropping 'restaurant_id' columns
+restaurant_data <- restaurant_data %>% 
+  select(-c('restaurant_id'))
+```
+
+```{r}
+summary(restaurant_data)
+```
+
+```{r}
+# List the columns of the restaurant_data dataset
+column_names <- colnames(restaurant_data)
+print(column_names)
+```
+
+```{r}
+# Convert listed_in_type and listed_in_city to factors
+restaurant_data <- restaurant_data %>%
+  mutate(
+    listed_in_type = factor(listed_in_type),
+    listed_in_city = factor(listed_in_city)
+  )
+
+# Now the columns listed_in_type and listed_in_city are converted to factors.
+# You can check the data structure using the str() function:
+str(restaurant_data)
+```
+```{r}
+
+# Remove NA values and replace them with 0 in specific columns
+restaurant_data <- restaurant_data %>%
+  mutate(
+    num_rest_type = ifelse(is.na(num_rest_type), 0, num_rest_type),
+    num_dishes_liked = ifelse(is.na(num_dishes_liked), 0, num_dishes_liked),
+    num_cuisines = ifelse(is.na(num_cuisines), 0, num_cuisines),
+    log_cost = ifelse(is.na(log_cost), 0, log_cost)
+  )
+
+```
+
+```{r}
+my_skim <- skimr::skim_with(numeric = skimr::sfl(p25 = NULL, p50 = NULL, p75 = NULL, hist = NULL))
+my_skim(restaurant_data)
+```
+
+# ```{r}
+# library(correlationfunnel)
+# cf <- restaurant_data %>%
+#   correlationfunnel::binarize(n_bins = 5, thresh_infreq = 0.01) %>%
+#   correlationfunnel::correlate(rate)
+# 
+# cf %>%
+#   correlationfunnel::plot_correlation_funnel(interactive = FALSE) %>%
+#   ggplotly()
+# ```
+
+```{r}
+restaurant_data_gwr <- cluster::daisy(restaurant_data[, 2:10], metric = "gower")
+```
+

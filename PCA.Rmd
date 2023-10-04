@@ -1,0 +1,109 @@
+---
+title: "PCA"
+author: "Chris Mathews"
+date: "2023-07-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(skimr)
+library(themis) # for step_other and step_dummy
+```
+
+```{r}
+restaurant_data <- read_csv("filtered_restaurant_data.csv")
+```
+
+```{r}
+# Dropping 'listed_in_type' and 'listed_in_city' columns
+restaurant_data <- restaurant_data %>% 
+  select(-c('restaurant_id'))
+```
+
+```{r}
+summary(restaurant_data)
+```
+
+```{r}
+# List the columns of the restaurant_data dataset
+column_names <- colnames(restaurant_data)
+print(column_names)
+```
+
+```{r}
+# Convert listed_in_type and listed_in_city to factors
+restaurant_data <- restaurant_data %>%
+  mutate(
+    listed_in_type = factor(listed_in_type),
+    listed_in_city = factor(listed_in_city)
+  )
+
+# Now the columns listed_in_type and listed_in_city are converted to factors.
+# You can check the data structure using the str() function:
+str(restaurant_data)
+```
+```{r}
+
+# Remove NA values and replace them with 0 in specific columns
+restaurant_data <- restaurant_data %>%
+  mutate(
+    num_rest_type = ifelse(is.na(num_rest_type), 0, num_rest_type),
+    num_dishes_liked = ifelse(is.na(num_dishes_liked), 0, num_dishes_liked),
+    num_cuisines = ifelse(is.na(num_cuisines), 0, num_cuisines),
+    log_cost = ifelse(is.na(log_cost), 0, log_cost)
+  )
+
+```
+
+```{r}
+# Dropping 'listed_in_type' and 'listed_in_city' columns
+restaurant_data <- restaurant_data %>% 
+  select(-c('restaurant_id'))
+```
+
+```{r}
+# Preprocess the data
+data_prep <- recipe(~., data = restaurant_data) %>%
+  # convert boolean to numeric
+  step_mutate(
+    online_order = as.numeric(online_order),
+    book_table = as.numeric(book_table)
+  ) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_normalize(all_predictors(), -all_outcomes()) %>%
+  prep()
+
+```
+
+```{r}
+# Prepare the data for PCA
+restaurant_data_pca <- bake(data_prep, new_data = NULL)
+```
+
+```{r}
+# Perform PCA
+set.seed(123)
+pca_recipe <- recipe(~ ., data = restaurant_data_pca) %>%
+  step_center(all_predictors(), -all_outcomes()) %>%
+  step_scale(all_predictors(), -all_outcomes()) %>%
+  step_pca(all_predictors(), -all_outcomes())
+```
+
+```{r}
+# Prepare the PCA model
+pca_prep <- prep(pca_recipe, training = restaurant_data_pca)
+
+# Get the principal components
+pca_components <- juice(pca_prep)
+
+# To view the standard deviations, proportion of variance, and cumulative proportion of each principal component:
+tidy(pca_prep, number = 1)
+```
+
